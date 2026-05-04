@@ -1,0 +1,33 @@
+#ifndef WIFI_CONFIG_H
+#define WIFI_CONFIG_H
+
+// ================= WiFi 配置 =================
+// 复制此文件为 wifi_config.h 并填入实际值
+#define WIFI_SSID "your_wifi_ssid"
+#define WIFI_PASSWORD "your_wifi_password"
+
+// ================= micro-ROS Agent 配置 =================
+// Ubuntu 虚拟机桥接网络 IP 地址
+#define MICRO_ROS_AGENT_IP "172.20.10.7"
+#define MICRO_ROS_AGENT_PORT 8888
+
+// ================= ROS2 配置 =================
+#define ROS_DOMAIN_ID 42
+
+// ================= 传感器配置 =================
+#define SENSOR_ODR PL::ADXL355_OutputDataRate::odr500
+#define SENSOR_RANGE PL::ADXL355_Range::range2g
+
+// ================= 发布配置 =================
+// ROS2 发布频率 (Hz) — 与传感器 ODR 一致以实现全量保存
+#define PUBLISH_RATE_HZ 500
+
+// ================= 硬件引脚 =================
+#define CS_PIN 5
+#define DRDY_PIN 4
+#define LED_PIN 2
+
+// ================= 队列配置 =================
+#define QUEUE_SIZE 512
+
+#endif
