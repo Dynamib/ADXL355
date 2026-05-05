@@ -2,7 +2,8 @@
 
 ## 项目概述
 
-使用 ESP32 驱动 ADXL355 加速度传感器，通过手机热点连接至局域网，将 ESP32 作为完整的 micro-ROS 节点，向同一网络下的 Ubuntu 虚拟机发布传感器数据。虚拟机内运行 ROS2 Humble、micro-ROS Agent 及 Python 可视化程序，实现**实时波形显示、500Hz 全量数据保存、历史回放与数字平滑处理**。
+使用 ESP32 驱动 ADXL355 加速度传感器（500Hz），通过 WiFi 连接至局域网，作为 micro-ROS 节点向 Ubuntu 虚拟机发布传感器数
+据。虚拟机内运行 ROS2 Humble、micro-ROS Agent 及可视化程序。
 
 ## 系统架构
 
@@ -11,27 +12,26 @@ ESP32 (micro-ROS)                  Ubuntu VM (ROS2 Humble)
 ┌─────────────────┐   UDP:8888   ┌──────────────────────────┐
 │ ADXL355 @500Hz   │─────────────>│  micro_ros_agent         │
 │ WiFi STA 模式    │              │    ↓                     │
-│ 发布 /adxl355/accel│            │  ROS2 Topic (500Hz)      │
-│ (geometry_msgs/  │              │    ↓           ↓         │
-│  Accel)          │              │  viz_node  arm_sub      │
-└─────────────────┘              │  (PyQt5)   (C++/Python) │
-                                 │    ↓                     │
-                                 │  Windows 显示 (VNC/ssh)  │
-                                 └──────────────────────────┘
-
-网络: 手机热点 (192.168.x.x)，ESP32 与宿主机均连接同一热点
-虚拟机: Ubuntu 22.04 + ROS2 Humble，桥接网络模式
+│ 发布 /adxl355/   │              │  DDS (Fast-DDS)          │
+│  accel           │              │    ↓           ↓         │
+│ (geometry_msgs/  │              │  echo        viz_node    │
+│  Accel)          │              │ (终端)      (PyQt5 GUI)  │
+└─────────────────┘              └──────────────────────────┘
 ```
 
-## 硬件需求
+**通信协议**: micro-ROS XRCE over UDP (port 8888) → Fast-DDS domain 0
 
-| 组件 | 说明 |
-|------|------|
-| ESP32 DevKit | 开发板（推荐 ESP32-WROOM-32） |
-| ADXL355 模块 | SPI 接口加速度传感器 |
-| 连接线 | 杜邦线 × 6（VCC/GND/CS/SCK/MOSI/MISO+DRDY） |
+## 项目服务说明
 
-### 接线
+| 服务 | 位置 | 说明 |
+|------|------|------|
+| **ESP32 固件** | `src/` | ADXL355 驱动 + micro-ROS 发布节点，需烧录到 ESP32 |
+| **micro-ROS Agent** | `ubuntu_vm/` | UDP→DDS 桥接，运行在 Ubuntu VM |
+| **adxl355_viz** | `adxl355_viz/` | PyQt5 实时可视化 GUI (ROS2 节点) |
+| **topic echo** | `ubuntu_vm/` | 终端查看实时数据 |
+| **arm 订阅示例** | `robot_arm_example/` | Python/C++ 订阅 /adxl355/accel 示例 |
+
+## 硬件需求与接线
 
 | ADXL355 | ESP32 |
 |---------|-------|
@@ -45,175 +45,183 @@ ESP32 (micro-ROS)                  Ubuntu VM (ROS2 Humble)
 
 ## 快速开始
 
-### 1. ESP32 固件烧录
-
-**前置条件**: 安装 [PlatformIO IDE](https://platformio.org/install) (VS Code 插件)
+### 1. ESP32 固件烧录（一次性）
 
 ```bash
-# 1. 修改 WiFi 配置
-# 编辑 config/wifi_config.h，设置:
-#   - WIFI_SSID / WIFI_PASSWORD (手机热点)
-#   - MICRO_ROS_AGENT_IP (Ubuntu 虚拟机 IP)
+# 复制配置模板，填入实际 WiFi 和 Agent IP
+cp config/wifi_config.h.example config/wifi_config.h
+# 编辑 config/wifi_config.h:
+#   WIFI_SSID / WIFI_PASSWORD → 手机热点
+#   MICRO_ROS_AGENT_IP       → Ubuntu 虚拟机 IP
 
-# 2. 编译 & 烧录
+# 编译并烧录
 pio run --target upload
 
-# 3. 查看串口日志
+# 查看串口日志确认状态
 pio device monitor
 ```
 
-**启动后状态指示**:
-- LED 闪烁: 正在连接 WiFi
-- LED 熄灭: 已连接 Agent，正常工作
-- LED 快闪: Agent 断线，自动重连中
+**状态指示灯 (GPIO 2)**:
+- 慢闪 (500ms) → WiFi 连接中
+- 熄灭 → 已连接 Agent，正常工作
+- 快闪 (200ms) → Agent 断线，自动重连中
 
-### 2. Ubuntu 虚拟机配置
+### 2. Ubuntu VM 环境准备（一次性）
 
 ```bash
 # 安装 ROS2 Humble (如未安装)
-# 参考: https://docs.ros.org/en/humble/Installation.html
+# https://docs.ros.org/en/humble/Installation/Ubuntu-Install-Debs.html
 
-# 进入脚本目录
+# 编译安装 micro-ROS Agent
 cd ubuntu_vm
-chmod +x *.sh
-
-# 安装 micro-ROS Agent
 ./setup_microros_agent.sh
 
-# 配置防火墙
-./ufw_firewall_setup.sh
+# 编译可视化包 (可选)
+mkdir -p /tmp/viz_ws/src
+ln -s $(pwd)/../adxl355_viz /tmp/viz_ws/src/adxl355_viz
+cd /tmp/viz_ws
+colcon build
+```
 
-# 启动 Agent
+**网络要求**: 虚拟机桥接模式，与 ESP32 连接同一 WiFi（手机热点）。
+
+### 3. 一键启动所有服务
+
+```bash
+cd ubuntu_vm
+
+# 仅启动 Agent (终端查看数据)
+./start_all.sh
+
+# Agent + 终端 echo
+./start_all.sh echo
+
+# Agent + 可视化界面
+./start_all.sh viz
+
+# 全部启动
+./start_all.sh all
+```
+
+**工作流程**: 脚本自动清理 conda 环境 → 启动 Agent → 等待 ESP32 连接 → 启动所选服务。
+按 `Ctrl+C` 停止所有服务。
+
+### 4. 单独启动各服务
+
+```bash
+# 仅 Agent
 ./launch_agent.sh 8888 udp4
+
+# 终端查看数据 (另一个终端)
+./echo_accel.sh
+
+# 可视化界面 (另一个终端)
+unset CONDA_PREFIX && export RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+  && export ROS_DOMAIN_ID=0 && source /opt/ros/humble/setup.bash \
+  && source /tmp/viz_ws/install/local_setup.bash \
+  && ros2 run adxl355_viz viz_node
 ```
 
-**虚拟机网络要求**: 桥接模式，获得与宿主机同网段 IP。
-
-### 3. 启动可视化程序
+### 5. 验证
 
 ```bash
-# 编译 ROS2 包
-cd ~/ros2_ws
-colcon build --packages-select adxl355_viz
-source install/setup.bash
-
-# 设置 ROS Domain ID (与 ESP32 端一致)
-export ROS_DOMAIN_ID=42
-
-# 启动
-ros2 launch adxl355_viz adxl355_viz_launch.py
-```
-
-**Windows 端显示**:
-- **VNC (推荐)**: Ubuntu 安装 `vnc4server`，Windows 用 VNC Viewer 连接
-- **ssh -X**: Windows 安装 VcXsrv，`ssh -X user@vm-ip`
-
-### 4. 验证
-
-```bash
-# 查看话题
+# 查看话题列表
 ros2 topic list
 # 应看到 /adxl355/accel
 
-# 查看数据
+# 查看单次数据 (Z 轴应接近 1.0g)
 ros2 topic echo /adxl355/accel --once
 
-# 查看频率
+# 查看发布频率
 ros2 topic hz /adxl355/accel
-# 应接近 500 Hz
 ```
 
-## 可视化程序功能
+## 可视化程序 (adxl355_viz) 功能
 
 | 功能 | 说明 |
 |------|------|
-| 3 轴实时波形 | X(红)/Y(绿)/Z(蓝)，时间窗口可调 (1~60s) |
-| 开始/停止采集 | 暂停/恢复实时显示，数据仍从 ROS2 接收 |
-| 保存 CSV | 500Hz 全量保存，格式: timestamp, accel_x, accel_y, accel_z |
-| 加载历史 CSV | 加载并回放历史数据，自动扩展到 60s 时间窗 |
-| 滑动平均 | 可调窗口大小 (1~100) |
-| 指数平滑 | 可调平滑系数 α (0.01~1.0) |
-| 清除图表 | 清空缓冲区与显示 |
-| 统计面板 | 各轴当前值、均值、峰峰值、RMS |
-| 状态栏 | ROS 连接状态、实时频率、累计采样数 |
+| 3 轴实时波形 | X(红) / Y(绿) / Z(蓝)，时间窗口可调 1~60s |
+| 开始/停止 | 暂停/恢复显示，数据仍在缓冲 |
+| 保存/加载 CSV | 全量保存时间戳+三轴数据，支持回放 |
+| 滑动平均 | 可调窗口 1~100 |
+| 指数平滑 (EMA) | 可调系数 α 0.01~1.0 |
+| 统计面板 | 当前值、均值、峰峰值、RMS |
+| 状态栏 | 连接状态、实时频率、累计采样数 |
+| 明暗主题 | 切换暗色/亮色主题 |
 
-## 配置参数
+**依赖**: `python3-pyqt5 python3-pyqtgraph python3-numpy`
 
-### ESP32 端 (`config/wifi_config.h`)
+## 机械臂订阅示例
+
+接收 `/adxl355/accel`，检测振动幅值 > 阈值时触发运动事件。
+
+```bash
+# Python
+python3 robot_arm_example/py_subscriber/arm_accel_sub.py
+
+# C++ (需先编译)
+cd robot_arm_example/cpp_subscriber
+mkdir -p build && cd build
+cmake .. && make
+./arm_accel_sub
+```
+
+> 阈值默认为 0.5g，重力加速度 ~1g 会一直触发。实际使用时请改为 >1.1g，
+> 或在 `_accel_callback` 中减去重力分量。
+
+## 配置参考
+
+### ESP32 (`config/wifi_config.h`)
 
 ```cpp
-#define WIFI_SSID "YourHotspot"          // 手机热点 SSID
-#define WIFI_PASSWORD "YourPassword"     // 热点密码
-#define MICRO_ROS_AGENT_IP "192.168.1.100"  // 虚拟机 IP
-#define MICRO_ROS_AGENT_PORT 8888        // Agent 端口
-#define ROS_DOMAIN_ID 42                 // ROS Domain ID
-#define PUBLISH_RATE_HZ 500              // 发布频率
+#define WIFI_SSID "YourHotspot"
+#define WIFI_PASSWORD "YourPassword"
+#define MICRO_ROS_AGENT_IP "172.20.10.7"  // 虚拟机 IP
+#define MICRO_ROS_AGENT_PORT 8888
+#define PUBLISH_RATE_HZ 500
 ```
 
-### Agent 端
+### DDS 配置
 
-```bash
-./launch_agent.sh [port] [transport]
-# 示例: ./launch_agent.sh 8888 udp4
-```
-
-### 可视化端 (launch 参数)
-
-```bash
-ros2 launch adxl355_viz adxl355_viz_launch.py \
-    history_seconds:=60.0 \
-    smoothing_window:=5 \
-    smoothing_alpha:=0.3
-```
-
-## 机械臂订阅
-
-### Python 示例
-
-```bash
-python3 robot_arm_example/py_subscriber/arm_accel_sub.py
-```
-
-### C++ 示例
-
-```bash
-cd robot_arm_example/cpp_subscriber
-colcon build
-source install/setup.bash
-ros2 run arm_accel_subscriber arm_accel_sub
-```
-
-机械臂节点订阅 `/adxl355/accel` (500Hz)，计算加速度幅值，超过阈值 (0.5g) 触发动作事件。替换 `_on_motion_start()` / `_on_motion_end()` 中的逻辑即可对接具体机械臂 SDK。
-
-## 故障排查
-
-| 问题 | 检查 |
-|------|------|
-| ESP32 连不上 WiFi | 热点名称/密码是否正确，信号强度是否足够 |
-| Agent 收不到数据 | 1. 虚拟机 `ping` ESP32 IP 2. 防火墙 `sudo ufw status` 确认 UDP 8888 放行 3. WiFi 是否同一热点 |
-| 桥接网络无 IP | VMware: 编辑→虚拟网络编辑器→桥接模式选择正确 WiFi 网卡 |
-| `ros2 topic list` 无话题 | `export ROS_DOMAIN_ID=42`，确认与 ESP32 端一致 |
-| 可视化程序启动失败 | 确认安装了 `python3-pyqt5 python3-pyqtgraph python3-numpy` |
-| GUI 显示延迟高 | ssh -X 带宽不足，改用 VNC |
-| 发布频率低于 500Hz | ADXL355 库版本，检查 ODR 配置；WiFi 信号质量 |
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| `RMW_IMPLEMENTATION` | `rmw_fastrtps_cpp` | **必须用 Fast-DDS**，micro_ros_agent 不支持 Cyclone |
+| `ROS_DOMAIN_ID` | `0` | micro-ROS 固件硬编码 domain 0 |
+| Agent 端口 | `8888` | UDP，需与 ESP32 固件一致 |
 
 ## 文件结构
 
 ```
 ADXL355/
-├── platformio.ini          # PlatformIO 项目配置
+├── platformio.ini              # PlatformIO 项目配置
 ├── config/
-│   └── wifi_config.h       # WiFi/ROS/传感器配置
+│   ├── wifi_config.h.example   # 配置模板（提交到 git）
+│   └── wifi_config.h           # 真实配置（gitignore，需自行创建）
 ├── src/
-│   ├── main.cpp            # 主入口
-│   ├── adxl355_sensor.*    # ADXL355 传感器驱动
-│   └── microros_node.*     # micro-ROS 节点/发布者
-├── ubuntu_vm/              # 虚拟机部署脚本
-├── adxl355_viz/            # ROS2 Python 可视化包
-├── robot_arm_example/      # 机械臂订阅示例
-└── README.md               # 本文档
+│   ├── main.cpp                # 主入口 (WiFi + FreeRTOS 任务)
+│   ├── adxl355_sensor.cpp/h    # ADXL355 SPI 驱动 + 中断配置
+│   └── microros_node.cpp/h     # micro-ROS 节点 + 500Hz 发布者
+├── ubuntu_vm/
+│   ├── start_all.sh            # ★ 一键启动脚本
+│   ├── launch_agent.sh         # 单独启动 Agent
+│   ├── echo_accel.sh           # ros2 topic echo
+│   ├── setup_microros_agent.sh # Agent 编译安装
+│   └── ufw_firewall_setup.sh   # 防火墙配置
+├── adxl355_viz/                # ROS2 可视化包 (PyQt5)
+├── robot_arm_example/          # 机械臂订阅示例 (Python/C++)
+│   ├── py_subscriber/
+│   └── cpp_subscriber/
+└── README.md
 ```
 
-## 许可证
+## 故障排查
 
-Apache-2.0
+| 问题 | 检查 |
+|------|------|
+| ESP32 连不上 WiFi | 热点名称/密码是否正确 |
+| Agent 收不到数据 | `ping` ESP32 IP；检查虚拟机是否桥接到同一热点 |
+| `ros2 topic list` 无 `/adxl355/accel` | 确认 `ROS_DOMAIN_ID=0`, `RMW_IMPLEMENTATION=rmw_fastrtps_cpp` |
+| Agent 启动失败 | 端口占用: `ss -uln | grep 8888` |
+| 可视化无法启动 | 确认安装 `python3-pyqt5 python3-pyqtgraph` |
+| 数据全是 0 | 检查 DRDY 引脚连接，确认固件含中断映射修复 |
+| 发布频率低于 500Hz | WiFi 信号质量；micro-ROS over WiFi 实际吞吐约 280Hz |

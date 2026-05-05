@@ -1,76 +1,78 @@
 # Ubuntu 虚拟机配置指南
 
-## 1. 虚拟机网络配置（桥接模式）
+## 目录
 
-### VMware Workstation
-1. 虚拟机设置 → 网络适配器 → 选择 **桥接模式**
-2. 桥接到 → 选择宿主机的 **WiFi 网卡**（连接手机热点的那个）
-3. 启动虚拟机，确认获得与宿主机同网段 IP：
-   ```bash
-   ip addr show
-   ```
-   应看到 `192.168.x.x` 的地址。
+- `start_all.sh` — **一键启动脚本** (推荐)
+- `launch_agent.sh` — 单独启动 micro-ROS Agent
+- `echo_accel.sh` — ros2 topic echo /adxl355/accel
+- `setup_microros_agent.sh` — 编译安装 micro-ROS Agent
+- `ufw_firewall_setup.sh` — 防火墙放行 UDP 8888
 
-### VirtualBox
-1. 虚拟机设置 → 网络 → 网卡 1 → 连接方式: **桥接网卡**
-2. 界面名称 → 选择宿主机的 **WiFi 网卡**
-3. 启动虚拟机，确认 IP 地址。
-
-## 2. 安装 ROS2 Humble
-
-参考官方文档: https://docs.ros.org/en/humble/Installation/Ubuntu-Install-Debs.html
+## 一键启动
 
 ```bash
-# 安装后 source 环境
-echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
-source ~/.bashrc
+cd ubuntu_vm
+
+# 仅 Agent
+./start_all.sh
+
+# Agent + 终端实时数据
+./start_all.sh echo
+
+# Agent + GUI 可视化
+./start_all.sh viz
+
+# 全部
+./start_all.sh all
 ```
 
-## 3. 安装 micro-ROS Agent
+按 `Ctrl+C` 停止所有服务。
+
+## 单独启动
 
 ```bash
-cd /path/to/ADXL355/ubuntu_vm
-chmod +x *.sh
-./setup_microros_agent.sh
-```
-
-## 4. 配置防火墙
-
-```bash
-./ufw_firewall_setup.sh
-```
-
-## 5. 启动 Agent
-
-```bash
+# 终端1: 启动 Agent
 ./launch_agent.sh 8888 udp4
+
+# 终端2: 查看数据
+./echo_accel.sh
+
+# 终端3 (可选): 可视化
+ros2 run adxl355_viz viz_node
 ```
 
-## 6. 验证连通性
+## 环境要求
 
-在 ESP32 上电并连接热点后：
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| `RMW_IMPLEMENTATION` | `rmw_fastrtps_cpp` | micro_ros_agent 依赖 Fast-DDS |
+| `ROS_DOMAIN_ID` | `0` | ESP32 micro-ROS 硬编码 domain 0 |
+| Agent 端口 | `UDP 8888` | 与 ESP32 固件 `MICRO_ROS_AGENT_PORT` 一致 |
+
+> 以上环境变量由 `start_all.sh` 和 `launch_agent.sh` 自动设置，无需手动配置。
+
+## 网络配置
+
+1. 虚拟机设置为**桥接模式**，桥接到宿主机 WiFi 网卡
+2. 确认虚拟机和 ESP32 连接同一热点，且能互相 ping 通
+3. ESP32 IP 固定在 `config/wifi_config.h` 中配置
+
+## 编译可视化包
 
 ```bash
-# 查看话题是否收到数据
+mkdir -p /tmp/viz_ws/src
+ln -s /home/dy/PCB/ADXL355/adxl355_viz /tmp/viz_ws/src/adxl355_viz
+cd /tmp/viz_ws
 source /opt/ros/humble/setup.bash
-export ROS_DOMAIN_ID=42
-ros2 topic echo /adxl355/accel
+colcon build
 ```
 
-## 7. 环境变量
+## 故障排查
 
-在 `/etc/environment` 或 `~/.bashrc` 中设置：
-
-```bash
-export ROS_DOMAIN_ID=42
-export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-```
-
-## 8. 故障排查
-
-| 问题 | 检查项 |
-|------|--------|
-| Agent 启动失败 | 端口是否被占用: `sudo lsof -i :8888` |
-| 收不到 ESP32 数据 | 1. 虚拟机 ping ESP32 IP 2. 防火墙是否放行 UDP 8888 3. WiFi 是否同一热点 |
+| 问题 | 检查 |
+|------|------|
+| Agent 启动失败 | 端口是否被占用: `ss -uln \| grep 8888` |
+| 收不到 ESP32 数据 | 1. ping ESP32 IP 2. ESP32 是否上电 3. 是否同一 WiFi |
 | 桥接网络无 IP | VMware: 编辑→虚拟网络编辑器→桥接模式选择正确网卡 |
-| ROS2 话题无数据 | `ros2 topic list` 查看话题是否出现，确认 ROS_DOMAIN_ID 一致 |
+| ROS2 无话题 | `echo $ROS_DOMAIN_ID` 确认=0, `echo $RMW_IMPLEMENTATION` 确认=fastrtps |
+| Agent fmt/spdlog 报错 | conda 冲突，用 `start_all.sh` 自动清理环境 |
