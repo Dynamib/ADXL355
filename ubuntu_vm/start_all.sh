@@ -91,9 +91,29 @@ else
     echo "[OK] Agent 已启动 (PID $AGENT_PID)"
 fi
 
-# ====================== 2. 等待 ESP32 连接 ======================
+# ====================== 2. 重置 ESP32 ======================
 echo ""
-echo "[等待] 等待 ESP32 连接..."
+ESP_PORT=$(ls /dev/ttyACM* 2>/dev/null | head -1)
+ESP_PORT=${ESP_PORT:-$(ls /dev/ttyUSB* 2>/dev/null | head -1)}
+
+if [ -n "$ESP_PORT" ]; then
+    echo "[重置] ESP32 ($ESP_PORT)..."
+    python3 -c "
+import serial, time
+s = serial.Serial('$ESP_PORT', 115200, timeout=1)
+time.sleep(0.3)
+s.setDTR(False)
+time.sleep(0.3)
+s.setDTR(True)
+s.close()
+" 2>/dev/null && echo "[OK] ESP32 已重置" || echo "[警告] ESP32 重置失败"
+else
+    echo "[提示] 未检测到 ESP32 串口，跳过重置"
+fi
+
+# ====================== 3. 等待 ESP32 连接 ======================
+echo ""
+echo "[等待] 等待 ESP32 连接 (最多 45 秒)..."
 
 WAIT_START=$(date +%s)
 while true; do
@@ -102,8 +122,8 @@ while true; do
         break
     fi
     elapsed=$(( $(date +%s) - WAIT_START ))
-    if [ $elapsed -gt 30 ]; then
-        echo "[警告] 30 秒内未检测到 ESP32 连接"
+    if [ $elapsed -gt 45 ]; then
+        echo "[警告] 45 秒内未检测到 ESP32 连接"
         echo "  请检查: 1) ESP32 是否上电  2) WiFi 是否同一热点"
         echo "  将继续启动后续服务..."
         break
