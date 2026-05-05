@@ -18,6 +18,12 @@ AGENT_TRANSPORT=${AGENT_TRANSPORT:-udp4}
 unset CONDA_PREFIX CONDA_EXE CONDA_PYTHON_EXE CONDA_SHLVL _CE_CONDA
 export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/ros/humble/bin
+
+# 清理旧的 ros2 daemon (避免 domain/RMW 不匹配干扰)
+echo "[清理] 关闭旧 ros2 daemon..."
+pkill -f "ros2 daemon" 2>/dev/null || true
+pkill -f "micro_ros_agent" 2>/dev/null || true
+sleep 1
 export HOME=/home/dy
 
 # DDS 配置 — micro_ros_agent 必须使用 rmw_fastrtps_cpp
