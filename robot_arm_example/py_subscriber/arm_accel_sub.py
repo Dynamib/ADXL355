@@ -38,9 +38,9 @@ class ArmAccelSubscriber(Node):
     def _callback(self, msg: Accel):
         self._msg_count += 1
 
-        ax = msg.linear_acceleration.x
-        ay = msg.linear_acceleration.y
-        az = msg.linear_acceleration.z
+        ax = msg.linear.x
+        ay = msg.linear.y
+        az = msg.linear.z
         magnitude = math.sqrt(ax * ax + ay * ay + az * az)
 
         now = time.time()

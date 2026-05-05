@@ -41,15 +41,11 @@ class ADXL355VizNode(Node):
     def _accel_callback(self, msg: Accel):
         self._msg_count += 1
 
-        # Use header timestamp if valid, else system time
-        if msg.header.stamp.sec > 0 or msg.header.stamp.nanosec > 0:
-            t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        else:
-            t = time.time()
+        t = time.time()
 
-        ax = msg.linear_acceleration.x
-        ay = msg.linear_acceleration.y
-        az = msg.linear_acceleration.z
+        ax = msg.linear.x
+        ay = msg.linear.y
+        az = msg.linear.z
 
         self._buffer.append(t, ax, ay, az)
 

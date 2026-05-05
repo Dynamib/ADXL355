@@ -38,9 +38,9 @@ private:
   rclcpp::Time last_event_time_{0, 0, RCL_ROS_TIME};
 
   void callback(const geometry_msgs::msg::Accel::SharedPtr msg) {
-    double ax = msg->linear_acceleration.x;
-    double ay = msg->linear_acceleration.y;
-    double az = msg->linear_acceleration.z;
+    double ax = msg->linear.x;
+    double ay = msg->linear.y;
+    double az = msg->linear.z;
     double magnitude = std::sqrt(ax * ax + ay * ay + az * az);
 
     auto now = this->now();
